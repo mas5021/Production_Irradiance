@@ -43,10 +43,10 @@
           width = 800 - margin.left - margin.right,
           height = 500 - margin.top - margin.bottom;
 
-    // Create the SVG group container.
-    const svg = d3.select("#chart")
-                  .append("g")
-                  .attr("transform", translate(${margin.left},${margin.top}));
+    // Create the outer SVG and a group container.
+    const svg = d3.select("#chart");
+    const g = svg.append("g")
+                 .attr("transform", `translate(${margin.left},${margin.top})`);
 
     // Global variables to store processed data.
     let cropDataGrouped;    // Map: Crop => Array of {Year, Production}
@@ -57,13 +57,16 @@
       d3.csv(cropUrl),
       d3.csv(climateUrl)
     ]).then(function([cropRaw, climateRaw]) {
-      // PROCESS CROP PRODUCTION DATA:
+      // --------------------------
+      // PROCESS CROP PRODUCTION DATA
+      // --------------------------
       cropRaw.forEach(d => {
         d.Year = +d.TIME;
         d.Production = +d.Value;
         d.Crop = d.SUBJECT;
       });
       // Filter crop data to only include records for "United States of America"
+      // (Adjust the country name if needed: e.g., "United States" or "USA")
       const cropUSA = cropRaw.filter(d => d.Country === "United States of America" && !isNaN(d.Year) && !isNaN(d.Production));
 
       // Group crop data by Crop.
@@ -77,19 +80,23 @@
         cropDataGrouped.set(cropName, arr);
       });
 
-      // PROCESS CLIMATE DATA:
+      // --------------------------
+      // PROCESS CLIMATE DATA
+      // --------------------------
       climateRaw.forEach(d => {
-        d.Year = +d.Year;
+        d.Year = Math.floor(+d.Year); // In case Year is like "2020.0"
         d.Solar = +d["Solar_Irradiance (W/m²)"];
       });
-      // Filter climate data for the United States (the climate dataset uses "United States")
+      // Filter climate data for the United States.
       const climateUSA = climateRaw.filter(d => d.Country === "United States" && !isNaN(d.Year) && !isNaN(d.Solar));
       // Group climate data by Year to get average Solar Irradiance.
       const climateByYear = d3.rollup(climateUSA, v => d3.mean(v, d => d.Solar), d => d.Year);
       climateDataGrouped = Array.from(climateByYear, ([Year, Solar]) => ({ Year, Solar }));
       climateDataGrouped.sort((a, b) => a.Year - b.Year);
 
+      // --------------------------
       // Populate dropdown with available crops.
+      // --------------------------
       const crops = Array.from(cropDataGrouped.keys()).sort();
       d3.select("#cropSelect")
         .selectAll("option")
@@ -99,7 +106,7 @@
         .attr("value", d => d)
         .text(d => d);
 
-      // Initially update chart with first crop.
+      // Initially update chart with the first crop.
       updateChart(crops[0]);
 
       // On dropdown change, update chart.
@@ -112,10 +119,12 @@
       console.error("Error loading data:", error);
     });
 
+    // --------------------------
     // Function to update the dual-axis chart based on the selected crop.
+    // --------------------------
     function updateChart(selectedCrop) {
-      // Clear previous chart elements.
-      svg.selectAll("*").remove();
+      // Clear previous chart elements from the group container.
+      g.selectAll("*").remove();
 
       // Get crop production data for the selected crop.
       const cropData = cropDataGrouped.get(selectedCrop);
@@ -129,7 +138,11 @@
         };
       }).filter(d => d.Solar !== null);
 
+      console.log("Merged Data for", selectedCrop, ":", mergedData);
+
+      // --------------------------
       // Set up scales.
+      // --------------------------
       const xScale = d3.scaleLinear()
                        .domain(d3.extent(mergedData, d => d.Year))
                        .range([0, width]);
@@ -144,93 +157,105 @@
                             .domain([0, d3.max(mergedData, d => d.Solar) * 1.1])
                             .range([height, 0]);
 
-      // Create x-axis.
-      svg.append("g")
-         .attr("transform", translate(0,${height}))
-         .call(d3.axisBottom(xScale).ticks(mergedData.length).tickFormat(d3.format("d")));
+      // --------------------------
+      // Draw Axes.
+      // --------------------------
+      // X-axis.
+      g.append("g")
+       .attr("transform", `translate(0,${height})`)
+       .call(d3.axisBottom(xScale).ticks(mergedData.length).tickFormat(d3.format("d")));
 
-      // Create left y-axis (Production).
-      svg.append("g")
-         .call(d3.axisLeft(yLeftScale))
-         .append("text")
-         .attr("transform", "rotate(-90)")
-         .attr("y", -50)
-         .attr("x", -height / 2)
-         .attr("dy", "1em")
-         .style("text-anchor", "middle")
-         .text("Average Crop Yield (Production)");
+      // Left y-axis (Production).
+      g.append("g")
+       .call(d3.axisLeft(yLeftScale))
+       .append("text")
+       .attr("transform", "rotate(-90)")
+       .attr("y", -50)
+       .attr("x", -height / 2)
+       .attr("dy", "1em")
+       .style("text-anchor", "middle")
+       .text("Average Crop Yield (Production)");
 
-      // Create right y-axis (Solar Irradiance).
-      svg.append("g")
-         .attr("transform", translate(${width},0))
-         .call(d3.axisRight(yRightScale))
-         .append("text")
-         .attr("transform", "rotate(-90)")
-         .attr("y", 40)
-         .attr("x", -height / 2)
-         .attr("dy", "1em")
-         .style("text-anchor", "middle")
-         .text("Avg Solar Irradiance (W/m²)");
+      // Right y-axis (Solar Irradiance).
+      g.append("g")
+       .attr("transform", `translate(${width},0)`)
+       .call(d3.axisRight(yRightScale))
+       .append("text")
+       .attr("transform", "rotate(-90)")
+       .attr("y", 40)
+       .attr("x", -height / 2)
+       .attr("dy", "1em")
+       .style("text-anchor", "middle")
+       .text("Avg Solar Irradiance (W/m²)");
 
-      // Define line generator for crop production.
+      // --------------------------
+      // Define Line Generators.
+      // --------------------------
       const lineProduction = d3.line()
                                .x(d => xScale(d.Year))
                                .y(d => yLeftScale(d.Production));
 
-      // Define line generator for solar irradiance.
       const lineSolar = d3.line()
                           .x(d => xScale(d.Year))
                           .y(d => yRightScale(d.Solar));
 
-      // Draw crop production line (blue).
-      svg.append("path")
-         .datum(mergedData)
-         .attr("fill", "none")
-         .attr("stroke", "steelblue")
-         .attr("stroke-width", 2)
-         .attr("d", lineProduction);
+      // --------------------------
+      // Draw Lines.
+      // --------------------------
+      // Production line (blue).
+      g.append("path")
+       .datum(mergedData)
+       .attr("fill", "none")
+       .attr("stroke", "steelblue")
+       .attr("stroke-width", 2)
+       .attr("d", lineProduction);
 
-      // Draw solar irradiance line (orange).
-      svg.append("path")
-         .datum(mergedData)
-         .attr("fill", "none")
-         .attr("stroke", "orange")
-         .attr("stroke-width", 2)
-         .attr("d", lineSolar);
+      // Solar irradiance line (orange).
+      g.append("path")
+       .datum(mergedData)
+       .attr("fill", "none")
+       .attr("stroke", "orange")
+       .attr("stroke-width", 2)
+       .attr("d", lineSolar);
 
-      // Add chart title.
-      svg.append("text")
-         .attr("x", width / 2)
-         .attr("y", -20)
-         .attr("text-anchor", "middle")
-         .style("font-size", "16px")
-         .text(US Crop Yield vs. Solar Irradiance for ${selectedCrop});
+      // --------------------------
+      // Add Chart Title.
+      // --------------------------
+      g.append("text")
+       .attr("x", width / 2)
+       .attr("y", -20)
+       .attr("text-anchor", "middle")
+       .style("font-size", "16px")
+       .text(`US Crop Yield vs. Solar Irradiance for ${selectedCrop}`);
 
-      // Add data point circles with tooltips for production.
-      svg.selectAll(".dotProd")
-         .data(mergedData)
-         .enter()
-         .append("circle")
-         .attr("class", "dotProd")
-         .attr("cx", d => xScale(d.Year))
-         .attr("cy", d => yLeftScale(d.Production))
-         .attr("r", 4)
-         .attr("fill", "steelblue")
-         .append("title")
-         .text(d => Year: ${d.Year}\nYield: ${d.Production.toFixed(2)});
+      // --------------------------
+      // Add Data Points with Tooltips.
+      // --------------------------
+      // Production data points.
+      g.selectAll(".dotProd")
+       .data(mergedData)
+       .enter()
+       .append("circle")
+       .attr("class", "dotProd")
+       .attr("cx", d => xScale(d.Year))
+       .attr("cy", d => yLeftScale(d.Production))
+       .attr("r", 4)
+       .attr("fill", "steelblue")
+       .append("title")
+       .text(d => `Year: ${d.Year}\nYield: ${d.Production.toFixed(2)}`);
 
-      // Add data point circles with tooltips for solar irradiance.
-      svg.selectAll(".dotSolar")
-         .data(mergedData)
-         .enter()
-         .append("circle")
-         .attr("class", "dotSolar")
-         .attr("cx", d => xScale(d.Year))
-         .attr("cy", d => yRightScale(d.Solar))
-         .attr("r", 4)
-         .attr("fill", "orange")
-         .append("title")
-         .text(d => Year: ${d.Year}\nSolar: ${d.Solar.toFixed(2)});
+      // Solar irradiance data points.
+      g.selectAll(".dotSolar")
+       .data(mergedData)
+       .enter()
+       .append("circle")
+       .attr("class", "dotSolar")
+       .attr("cx", d => xScale(d.Year))
+       .attr("cy", d => yRightScale(d.Solar))
+       .attr("r", 4)
+       .attr("fill", "orange")
+       .append("title")
+       .text(d => `Year: ${d.Year}\nSolar: ${d.Solar.toFixed(2)}`);
     }
   </script>
 </body>
